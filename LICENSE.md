@@ -1,4 +1,4 @@
-#Butterfly Panel Software License
+## Butterfly Panel Software License
 1. Definitions
 "Software": The Butterfly Panel software application, including any updates, enhancements, or modifications.
 
