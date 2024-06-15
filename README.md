@@ -48,5 +48,3 @@ Some of our core supported games include:
 ## License
 
 Butterfly® Copyright © 2024 - 2024 Ben Matthews and contributors.
-
-Code released under the [MIT License](./LICENSE.md).
