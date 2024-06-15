@@ -3,66 +3,55 @@
 namespace Pterodactyl\Http\Controllers\Auth;
 
 use Illuminate\Http\Request;
-use Pterodactyl\Models\User;
 use Illuminate\Auth\AuthManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Event;
-use Pterodactyl\Events\Auth\DirectLogin;
 use Pterodactyl\Exceptions\DisplayException;
 use Pterodactyl\Http\Controllers\Controller;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Auth\AuthenticatesUsers;
+use Pterodactyl\Services\Users\UserCreationService;
 
-abstract class AbstractLoginController extends Controller
+abstract class AbstractRegisterController extends Controller
 {
     use AuthenticatesUsers;
 
     protected AuthManager $auth;
 
     /**
-     * Lockout time for failed login requests.
+     * Lockout time for failed register requests.
      */
     protected int $lockoutTime;
 
     /**
-     * After how many attempts should logins be throttled and locked.
+     * After how many attempts should registers be throttled and locked.
      */
-    protected int $maxLoginAttempts;
+    protected int $maxRegisterAttempts;
 
     /**
-     * Where to redirect users after login / registration.
-     */
-    protected string $redirectTo = '/';
-
-    /**
-     * LoginController constructor.
+     * RegisterController constructor.
      */
     public function __construct()
     {
         $this->lockoutTime = config('auth.lockout.time');
-        $this->maxLoginAttempts = config('auth.lockout.attempts');
+        $this->maxRegisterAttempts = config('auth.lockout.attempts');
         $this->auth = Container::getInstance()->make(AuthManager::class);
     }
 
     /**
-     * Get the failed login response instance.
+     * Get the failed register response instance.
      *
-     * @return never
-     *
-     * @throws DisplayException
+     * @throws \Pterodactyl\Exceptions\DisplayException
      */
-    protected function sendFailedLoginResponse(Request $request, Authenticatable $user = null, string $message = null)
+    protected function sendFailedRegisterResponse(Request $request, Authenticatable $user = null, string $message = null)
     {
         $this->incrementLoginAttempts($request);
-        $this->fireFailedLoginEvent($user, [
-            $this->getField($request->input('user')) => $request->input('user'),
+        $this->fireFailedRegisterEvent($user, [
+            $request->input('email'),
+            $request->input('username'),
         ]);
-
-        if ($request->route()->named('auth.login-checkpoint')) {
-            throw new DisplayException($message ?? trans('auth.two_factor.checkpoint_failed'));
-        }
 
         throw new DisplayException(trans('auth.failed'));
     }
@@ -70,38 +59,36 @@ abstract class AbstractLoginController extends Controller
     /**
      * Send the response after the user was authenticated.
      */
-    protected function sendLoginResponse(User $user, Request $request): JsonResponse
+    protected function sendRegisterResponse(Request $request): JsonResponse
     {
-        $request->session()->remove('auth_confirmation_token');
-        $request->session()->regenerate();
-
         $this->clearLoginAttempts($request);
 
-        $this->auth->guard()->login($user, true);
+        $connection = app(\Illuminate\Database\ConnectionInterface::class);
+        $hasher = app(\Illuminate\Contracts\Hashing\Hasher::class);
+        $passwordBroker = app(\Illuminate\Contracts\Auth\PasswordBroker::class);
+        $repository = app(\Pterodactyl\Contracts\Repository\UserRepositoryInterface::class);
 
-        Event::dispatch(new DirectLogin($user, true));
+        $user = new UserCreationService($connection, $hasher, $passwordBroker, $repository);
+
+        $user->handle([
+            'email' => $request->input('email'),
+            'username' => $request->input('username'),
+            'name_first' => $request->input('firstname'),
+            'name_last' => $request->input('lastname')
+        ]);
 
         return new JsonResponse([
             'data' => [
                 'complete' => true,
-                'intended' => $this->redirectPath(),
-                'user' => $user->toReactObject(),
+                'intended' => $this->redirectPath()
             ],
         ]);
     }
 
     /**
-     * Determine if the user is logging in using an email or username.
+     * Fire a failed register event.
      */
-    protected function getField(string $input = null): string
-    {
-        return ($input && str_contains($input, '@')) ? 'email' : 'username';
-    }
-
-    /**
-     * Fire a failed login event.
-     */
-    protected function fireFailedLoginEvent(Authenticatable $user = null, array $credentials = [])
+    protected function fireFailedRegisterEvent(Authenticatable $user = null, array $credentials = [])
     {
         Event::dispatch(new Failed('auth', $user, $credentials));
     }
